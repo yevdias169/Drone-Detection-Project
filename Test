@@ -1,0 +1,41 @@
+# %% Load Data
+import pandas as pd 
+import os
+
+path = "C:\Users\yevin\OneDrive\Documents\Engineering'\PRML\DroneRF_Dataset.zip\DroneRF"
+
+def LoadData():
+    
+    
+
+# %%
+import os
+import glob
+
+# Check your extracted DroneRF folder
+dronerf_path = r"C:\Users\yevin\OneDrive\Documents\Engineering'\PRML\DroneRF_Dataset\DroneRF"
+
+print("=== FOLDER STRUCTURE ===")
+for root, dirs, files in os.walk(dronerf_path):
+    level = root.replace(dronerf_path, '').count(os.sep)
+    indent = ' ' * 2 * level
+    print(f"{indent}{os.path.basename(root)}/")
+    
+    subindent = ' ' * 2 * (level + 1)
+    for file in files[:5]:  # Show first 5 files
+        file_path = os.path.join(root, file)
+        size_mb = os.path.getsize(file_path) / (1024*1024)
+        print(f"{subindent}{file} ({size_mb:.1f} MB)")
+    
+    if len(files) > 5:
+        print(f"{subindent}... and {len(files)-5} more files")
+
+print("\n=== SUMMARY ===")
+# Count total files
+all_files = glob.glob(os.path.join(dronerf_path, "**", "*"), recursive=True)
+csv_files = [f for f in all_files if f.endswith('.csv')]
+other_files = [f for f in all_files if not f.endswith('.csv') and os.path.isfile(f)]
+
+print(f"Total CSV files: {len(csv_files)}")
+print(f"Other files: {len(other_files)}")
+print(f"Expected CSV files: ~454")

@@ -1,0 +1,197 @@
+# %% Load and prepare BALANCED dataset
+import numpy as np
+import pandas as pd
+import glob
+import os
+from collections import defaultdict
+
+dronerf_path = r"C:\PRML\DroneRF_Dataset\DroneRF"
+
+def load_rf_signal_fast(file_path, n_samples=50000):
+    """Quick load for feature extraction"""
+    with open(file_path, 'r') as f:
+        data_line = f.readline().strip()
+    values = data_line.split(',')[:n_samples]
+    return np.array([float(v) for v in values])
+
+def extract_time_domain_features(signal):
+    """Extract simple time-domain features for Naive Bayes"""
+    return np.array([
+        np.sum(signal**2),                          # signal_energy
+        np.sqrt(np.mean(signal**2)),                # rms_amplitude
+        np.sum(np.diff(np.sign(signal)) != 0) / len(signal),  # zero_crossing_rate
+        np.max(signal) - np.min(signal),            # peak_to_peak
+        np.mean(np.abs(signal)),                    # mean_abs
+        np.std(signal)                              # std
+    ])
+
+print("="*70)
+print("NAIVE BAYES: BALANCED DATASET PREPARATION")
+print("="*70)
+
+# Get all files
+csv_files = glob.glob(os.path.join(dronerf_path, '**', '*.csv'), recursive=True)
+
+# Categorize by drone type and mode
+drone_categories = defaultdict(list)
+background_files = []
+
+for file_path in csv_files:
+    if 'background' in file_path.lower():
+        background_files.append(file_path)
+    else:
+        # Extract drone type from path (AR=101, Bebop=100, Phantom=110)
+        # and mode from filename pattern
+        parent_folder = file_path.split(os.sep)[-2]  # Get parent folder name
+        drone_categories[parent_folder].append(file_path)
+
+# Show distribution
+print("\nDataset Distribution:")
+print(f"Background: {len(background_files)} files")
+for category, files in sorted(drone_categories.items()):
+    print(f"{category}: {len(files)} files")
+
+# Balanced sampling: take equal samples from each category
+samples_per_category = 5  # Adjust based on time/memory constraints
+total_drone_categories = len(drone_categories)
+
+sample_files = []
+category_labels = []
+
+# Sample from each drone category
+for category, files in drone_categories.items():
+    sampled = files[:min(samples_per_category, len(files))]
+    sample_files.extend(sampled)
+    category_labels.extend([category] * len(sampled))
+
+# Sample from background (match total drone samples)
+n_background = len(sample_files)
+background_sampled = background_files[:min(n_background, len(background_files))]
+sample_files.extend(background_sampled)
+category_labels.extend(['Background'] * len(background_sampled))
+
+print(f"\n📊 Balanced Sample:")
+print(f"Total files: {len(sample_files)}")
+for cat in set(category_labels):
+    count = category_labels.count(cat)
+    print(f"  {cat}: {count} files")
+
+# %% Load sample files for EDA
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Select a few files for visualization (already in sample_files)
+eda_files = {
+    'drone': [f for f in sample_files if 'background' not in f.lower()][:3],
+    'background': [f for f in sample_files if 'background' in f.lower()][:3]
+}
+
+eda_signals = {}
+for category, files in eda_files.items():
+    for file_path in files:
+        filename = os.path.basename(file_path)
+        signal = load_rf_signal_fast(file_path, n_samples=50000)
+        eda_signals[filename] = {
+            'signal': signal,
+            'label': category
+        }
+
+print(f"Loaded {len(eda_signals)} files for EDA")
+# %% Singal Visualisation
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+
+# Select files representing different flight modes
+# Based on DroneRF naming: 10X00 = on/connected, 10X01 = hovering, 10X10 = flying, 10X11 = flying+video
+
+flight_mode_files = {}
+
+for file_path in sample_files:
+    if 'background' in file_path.lower():
+        continue
+    
+    filename = os.path.basename(file_path)
+    
+    # Identify flight mode from filename pattern
+    if '10000' in filename or '10100' in filename or '11000' in filename:
+        mode = 'On/Connected'
+    elif '10001' in filename or '10101' in filename or '11001' in filename:
+        mode = 'Hovering'
+    elif '10010' in filename or '10110' in filename or '11010' in filename:
+        mode = 'Flying'
+    elif '10011' in filename or '10111' in filename or '11011' in filename:
+        mode = 'Flying+Video'
+    else:
+        continue
+    
+    if mode not in flight_mode_files and len(flight_mode_files) < 3:
+        flight_mode_files[mode] = file_path
+
+# Add one background for comparison
+bg_file = [f for f in sample_files if 'background' in f.lower()][0]
+flight_mode_files['Background'] = bg_file
+
+print(f"Selected files for visualization:")
+for mode, path in flight_mode_files.items():
+    print(f"  {mode}: {os.path.basename(path)}")
+
+# Load and visualize
+fig, axes = plt.subplots(len(flight_mode_files), 1, figsize=(15, 10))
+
+for idx, (mode, file_path) in enumerate(flight_mode_files.items()):
+    signal = load_rf_signal_fast(file_path, n_samples=50000)
+    
+    # Plot first 5000 samples for clarity
+    axes[idx].plot(signal[:5000], linewidth=0.5, alpha=0.8)
+    axes[idx].set_title(f"{mode} - {os.path.basename(file_path)}", fontsize=11, fontweight='bold')
+    axes[idx].set_ylabel("RF Amplitude")
+    axes[idx].grid(True, alpha=0.3)
+    
+    # Add statistics to each plot
+    stats_text = f"Mean: {signal.mean():.2f}, Std: {signal.std():.2f}, Range: [{signal.min():.1f}, {signal.max():.1f}]"
+    axes[idx].text(0.02, 0.95, stats_text, transform=axes[idx].transAxes, 
+                   fontsize=9, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+axes[-1].set_xlabel("Sample Index")
+plt.tight_layout()
+plt.show()
+
+# %%
+print("="*70)
+print("RAW SIGNAL STATISTICS")
+print("="*70)
+
+for filename, info in eda_signals.items():
+    signal = info['signal']
+    label = info['label']
+    
+    print(f"\n{filename} ({label}):")
+    print(f"  Length: {len(signal):,} samples")
+    print(f"  Range: [{signal.min():.2f}, {signal.max():.2f}]")
+    print(f"  Mean: {signal.mean():.3f}")
+    print(f"  Std: {signal.std():.3f}")
+    print(f"  Energy: {np.sum(signal**2):.2e}")
+# %% Class Comparison
+
+drone_signals = [info['signal'] for f, info in eda_signals.items() if info['label'] == 'drone']
+bg_signals = [info['signal'] for f, info in eda_signals.items() if info['label'] == 'background']
+
+print("\n" + "="*70)
+print("CLASS COMPARISON (Raw Signals)")
+print("="*70)
+
+metrics = {
+    'Mean': lambda s: s.mean(),
+    'Std': lambda s: s.std(),
+    'Energy': lambda s: np.sum(s**2),
+    'Peak-to-Peak': lambda s: s.max() - s.min()
+}
+
+for metric_name, metric_fn in metrics.items():
+    drone_avg = np.mean([metric_fn(s) for s in drone_signals])
+    bg_avg = np.mean([metric_fn(s) for s in bg_signals])
+    diff_pct = abs(drone_avg - bg_avg) / bg_avg * 100 if bg_avg != 0 else 0
+    
+    print(f"{metric_name:15s}: Drone={drone_avg:.2e}, Background={bg_avg:.2e}, Diff={diff_pct:.1f}%")
+# %%
