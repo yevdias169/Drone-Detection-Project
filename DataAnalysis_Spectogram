@@ -1,1 +1,278 @@
-%##
+
+# %% Load and prepare BALANCED dataset
+import numpy as np
+import pandas as pd
+import glob
+import os
+from collections import defaultdict
+
+dronerf_path = r"C:\PRML\DroneRF_Dataset\DroneRF"
+
+def load_rf_signal_fast(file_path, n_samples=50000):
+    """Quick load for feature extraction"""
+    with open(file_path, 'r') as f:
+        data_line = f.readline().strip()
+    values = data_line.split(',')[:n_samples]
+    return np.array([float(v) for v in values])
+
+def extract_time_domain_features(signal):
+    """Extract simple time-domain features for Naive Bayes"""
+    return np.array([
+        np.sum(signal**2),                          # signal_energy
+        np.sqrt(np.mean(signal**2)),                # rms_amplitude
+        np.sum(np.diff(np.sign(signal)) != 0) / len(signal),  # zero_crossing_rate
+        np.max(signal) - np.min(signal),            # peak_to_peak
+        np.mean(np.abs(signal)),                    # mean_abs
+        np.std(signal)                              # std
+    ])
+
+print("="*70)
+print("NAIVE BAYES: BALANCED DATASET PREPARATION")
+print("="*70)
+
+# Get all files
+csv_files = glob.glob(os.path.join(dronerf_path, '**', '*.csv'), recursive=True)
+
+# Categorize by drone type and mode
+drone_categories = defaultdict(list)
+background_files = []
+
+for file_path in csv_files:
+    if 'background' in file_path.lower():
+        background_files.append(file_path)
+    else:
+        # Extract drone type from path (AR=101, Bebop=100, Phantom=110)
+        # and mode from filename pattern
+        parent_folder = file_path.split(os.sep)[-2]  # Get parent folder name
+        drone_categories[parent_folder].append(file_path)
+
+# Show distribution
+print("\nDataset Distribution:")
+print(f"Background: {len(background_files)} files")
+for category, files in sorted(drone_categories.items()):
+    print(f"{category}: {len(files)} files")
+
+# Balanced sampling: take equal samples from each category
+samples_per_category = 5  # Adjust based on time/memory constraints
+total_drone_categories = len(drone_categories)
+
+sample_files = []
+category_labels = []
+
+# Sample from each drone category
+for category, files in drone_categories.items():
+    sampled = files[:min(samples_per_category, len(files))]
+    sample_files.extend(sampled)
+    category_labels.extend([category] * len(sampled))
+
+# Sample from background (match total drone samples)
+n_background = len(sample_files)
+background_sampled = background_files[:min(n_background, len(background_files))]
+sample_files.extend(background_sampled)
+category_labels.extend(['Background'] * len(background_sampled))
+
+print(f"\n📊 Balanced Sample:")
+print(f"Total files: {len(sample_files)}")
+for cat in set(category_labels):
+    count = category_labels.count(cat)
+    print(f"  {cat}: {count} files")
+
+# %% MFCC Feature extraction
+from scipy import signal as scipy_signal
+from scipy.fftpack import dct
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+
+def extract_mfcc_features(rf_signal, n_mfcc=13, n_fft=512):
+    """Extract MFCC features from RF signal"""
+    f, t, Sxx = scipy_signal.spectrogram(
+        rf_signal, 
+        fs=1.0,
+        nperseg=n_fft,
+        noverlap=n_fft//2
+    )
+    
+    power_spectrum = np.abs(Sxx) + 1e-10
+    log_power = np.log(power_spectrum)
+    mfcc = dct(log_power, axis=0, norm='ortho')[:n_mfcc]
+    
+    features = np.concatenate([
+        np.mean(mfcc, axis=1),
+        np.std(mfcc, axis=1),
+        np.max(mfcc, axis=1),
+        np.min(mfcc, axis=1)
+    ])
+    
+    return features
+
+print("="*70)
+print("EXTRACTING MFCC FEATURES")
+print("="*70)
+
+X_mfcc_list = []
+y_mfcc_list = []
+
+for i, file_path in enumerate(sample_files):
+    if i % 10 == 0:
+        print(f"Processing {i+1}/{len(sample_files)}...")
+    
+    signal_data = load_rf_signal_fast(file_path, n_samples=50000)
+    features = extract_mfcc_features(signal_data)
+    label = 1 if 'background' not in file_path.lower() else 0
+    
+    X_mfcc_list.append(features)
+    y_mfcc_list.append(label)
+
+X_mfcc = np.array(X_mfcc_list)
+y_mfcc = np.array(y_mfcc_list)    
+# %%
+
+# %% Compare feature separability
+import matplotlib.pyplot as plt
+
+# Create comparison figure
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+# Plot: MFCC features (good separation)
+axes[0].scatter(X_mfcc[y_mfcc==0, 0], X_mfcc[y_mfcc==0, 5], alpha=0.6, label='Background')
+axes[0].scatter(X_mfcc[y_mfcc==1, 0], X_mfcc[y_mfcc==1, 5], alpha=0.6, label='Drone')
+axes[0].set_xlabel('MFCC Coefficient 1')
+axes[0].set_ylabel('MFCC Coefficient 6')
+axes[0].set_title('MFCC Features\n(Classes Separated)')
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+# %% Visualize MFCC Spectrograms
+import matplotlib.pyplot as plt
+from scipy import signal as scipy_signal
+from scipy.fftpack import dct
+
+def compute_mfcc_for_visualization(rf_signal, n_mfcc=13, n_fft=512):
+    """Compute MFCC spectrogram for visualization"""
+    # Compute power spectrogram
+    f, t, Sxx = scipy_signal.spectrogram(
+        rf_signal, 
+        fs=1.0,
+        nperseg=n_fft,
+        noverlap=n_fft//2
+    )
+    
+    # Convert to power and log
+    power_spectrum = np.abs(Sxx) + 1e-10
+    log_power = np.log(power_spectrum)
+    
+    # Apply DCT to get MFCC coefficients
+    mfcc = dct(log_power, axis=0, norm='ortho')[:n_mfcc]
+    
+    return mfcc, t
+
+# Select representative files
+mfcc_viz_files = {}
+
+for file_path in sample_files:
+    if 'background' in file_path.lower():
+        if 'Background' not in mfcc_viz_files:
+            mfcc_viz_files['Background'] = file_path
+    else:
+        filename = os.path.basename(file_path)
+        # Try to get different flight modes
+        if '10000' in filename or '10100' in filename or '11000' in filename:
+            if 'On/Connected' not in mfcc_viz_files:
+                mfcc_viz_files['On/Connected'] = file_path
+        elif '10001' in filename or '10101' in filename:
+            if 'Hovering' not in mfcc_viz_files:
+                mfcc_viz_files['Hovering'] = file_path
+        elif '10010' in filename or '10110' in filename:
+            if 'Flying' not in mfcc_viz_files:
+                mfcc_viz_files['Flying'] = file_path
+
+print("Selected files for MFCC visualization:")
+for mode, path in mfcc_viz_files.items():
+    print(f"  {mode}: {os.path.basename(path)}")
+
+# Compute and visualize MFCCs
+fig, axes = plt.subplots(len(mfcc_viz_files), 1, figsize=(12, 10))
+
+for idx, (mode, file_path) in enumerate(mfcc_viz_files.items()):
+    signal_data = load_rf_signal_fast(file_path, n_samples=50000)
+    mfcc, time = compute_mfcc_for_visualization(signal_data)
+    
+    # Plot MFCC coefficients over time
+    im = axes[idx].imshow(mfcc, aspect='auto', origin='lower', cmap='viridis', 
+                          extent=[0, time[-1], 0, mfcc.shape[0]])
+    axes[idx].set_title(f"{mode} - MFCC Coefficients", fontweight='bold')
+    axes[idx].set_ylabel("MFCC Coefficient")
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=axes[idx])
+    cbar.set_label('Amplitude')
+
+axes[-1].set_xlabel("Time (normalized)")
+plt.tight_layout()
+plt.show()
+# %%
+print("="*70)
+print("CLASS COMPARISON (MFCC Features)")
+print("="*70)
+
+# Separate MFCC features by class
+drone_mfcc = X_mfcc[y_mfcc == 1]
+bg_mfcc = X_mfcc[y_mfcc == 0]
+
+print(f"\nDrone samples: {len(drone_mfcc)}")
+print(f"Background samples: {len(bg_mfcc)}")
+
+# Compare statistics for each MFCC feature dimension
+print(f"\nFeature-wise comparison (52 MFCC features total):")
+print(f"{'Feature':<20} {'Drone Mean':>15} {'BG Mean':>15} {'Difference':>15}")
+print("-"*70)
+
+# Show first 10 features as examples
+for i in range(min(10, X_mfcc.shape[1])):
+    drone_mean = drone_mfcc[:, i].mean()
+    bg_mean = bg_mfcc[:, i].mean()
+    diff_pct = abs(drone_mean - bg_mean) / (abs(bg_mean) + 1e-10) * 100
+    
+    print(f"MFCC Feature {i:<7} {drone_mean:>15.3f} {bg_mean:>15.3f} {diff_pct:>14.1f}%")
+
+# Overall statistics
+print("\n" + "="*70)
+print("AGGREGATE STATISTICS")
+print("="*70)
+
+metrics = {
+    'Mean (all features)': lambda x: x.mean(),
+    'Std (all features)': lambda x: x.std(),
+    'Max (all features)': lambda x: x.max(),
+    'Min (all features)': lambda x: x.min(),
+}
+
+for metric_name, metric_fn in metrics.items():
+    drone_val = metric_fn(drone_mfcc)
+    bg_val = metric_fn(bg_mfcc)
+    diff_pct = abs(drone_val - bg_val) / (abs(bg_val) + 1e-10) * 100
+    
+    print(f"{metric_name:25s}: Drone={drone_val:>10.3f}, Background={bg_val:>10.3f}, Diff={diff_pct:>6.1f}%")
+
+# Feature variance comparison (shows which features are most discriminative)
+print("\n" + "="*70)
+print("FEATURE DISCRIMINATIVE POWER")
+print("="*70)
+
+feature_separations = []
+for i in range(X_mfcc.shape[1]):
+    drone_mean = drone_mfcc[:, i].mean()
+    bg_mean = bg_mfcc[:, i].mean()
+    separation = abs(drone_mean - bg_mean)
+    feature_separations.append((i, separation))
+
+# Sort by separation
+feature_separations.sort(key=lambda x: x[1], reverse=True)
+
+print("\nTop 5 Most Discriminative MFCC Features:")
+for rank, (feature_idx, separation) in enumerate(feature_separations[:5], 1):
+    print(f"  {rank}. MFCC Feature {feature_idx}: Separation = {separation:.3f}")
+# %%

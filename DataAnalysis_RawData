@@ -194,4 +194,6 @@ for metric_name, metric_fn in metrics.items():
     diff_pct = abs(drone_avg - bg_avg) / bg_avg * 100 if bg_avg != 0 else 0
     
     print(f"{metric_name:15s}: Drone={drone_avg:.2e}, Background={bg_avg:.2e}, Diff={diff_pct:.1f}%")
-# %%
+# %% MFCC Feature Extraction
+
+

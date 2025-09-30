@@ -170,7 +170,7 @@ print(f"LOGISTIC REGRESSION: {accuracy:.2%} ACCURACY")
 print("="*70)
 
 # %%
-# %% MFCC Feature Extraction (OPTIONAL - Running in background)
+# %% MFCC Feature Extraction 
 from scipy import signal as scipy_signal
 from scipy.fftpack import dct
 from sklearn.linear_model import LogisticRegression
@@ -246,4 +246,91 @@ F1Score = f1_score(y_test_mfcc, y_pred_mfcc)
 print(f"Precision: {precision}")
 print(f"Recall: {recall}")
 print(f"Recall: {F1Score}")
+# %%
+# %% Cross-Validation Evaluation
+from sklearn.model_selection import cross_val_score, cross_validate
+from sklearn.pipeline import Pipeline
+
+print("="*70)
+print("CROSS-VALIDATION EVALUATION")
+print("="*70)
+
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('logistic', LogisticRegression(max_iter=1000, random_state=42, class_weight='balanced'))
+])
+
+# Perform 5-fold cross-validation
+cv_scores = cross_val_score(
+    pipeline, 
+    X_mfcc,           
+    y_mfcc,           
+    cv=5,             
+    scoring='accuracy'
+)
+
+print(f"\nCross-Validation Results (5-fold):")
+print(f"Accuracy per fold: {cv_scores}")
+print(f"\nMean Accuracy: {cv_scores.mean():.2%}")
+print(f"Std Dev: {cv_scores.std():.4f}")
+print(f"95% Confidence Interval: {cv_scores.mean():.2%} ± {1.96 * cv_scores.std():.2%}")
+
+# Get multiple metrics at once
+cv_results = cross_validate(
+    pipeline,
+    X_mfcc,
+    y_mfcc,
+    cv=5,
+    scoring=['accuracy', 'precision', 'recall', 'f1']
+)
+
+print(f"\n{'='*70}")
+print("DETAILED METRICS (mean ± std)")
+print(f"{'='*70}")
+print(f"Accuracy:  {cv_results['test_accuracy'].mean():.2%} ± {cv_results['test_accuracy'].std():.4f}")
+print(f"Precision: {cv_results['test_precision'].mean():.2%} ± {cv_results['test_precision'].std():.4f}")
+print(f"Recall:    {cv_results['test_recall'].mean():.2%} ± {cv_results['test_recall'].std():.4f}")
+print(f"F1-Score:  {cv_results['test_f1'].mean():.2%} ± {cv_results['test_f1'].std():.4f}")
+# %%
+print(cv_results.confusion_matrix())
+# %%
+# %% Print Confusion Matrix 
+from sklearn.model_selection import cross_val_predict
+import numpy as np
+
+print("="*70)
+print("CONFUSION MATRIX (Cross-Validation)")
+print("="*70)
+
+# Get predictions from cross-validation
+y_pred_cv = cross_val_predict(
+    pipeline, 
+    X_mfcc, 
+    y_mfcc, 
+    cv=5
+)
+
+# Generate confusion matrix
+cm_cv = confusion_matrix(y_mfcc, y_pred_cv)
+
+print("\nConfusion Matrix:")
+print(cm_cv)
+print(f"\nTrue Negatives (Background correctly classified):  {cm_cv[0,0]}")
+print(f"False Positives (Background predicted as Drone):   {cm_cv[0,1]}")
+print(f"False Negatives (Drone predicted as Background):   {cm_cv[1,0]}")
+print(f"True Positives (Drone correctly classified):       {cm_cv[1,1]}")
+
+# Calculate percentages
+total = cm_cv.sum()
+print(f"\nAs Percentages:")
+print(f"True Negatives:  {cm_cv[0,0]/total:.1%}")
+print(f"False Positives: {cm_cv[0,1]/total:.1%}")
+print(f"False Negatives: {cm_cv[1,0]/total:.1%}")
+print(f"True Positives:  {cm_cv[1,1]/total:.1%}")
+
+# Classification report
+print("\n" + "="*70)
+print("CLASSIFICATION REPORT (Cross-Validation)")
+print("="*70)
+print(classification_report(y_mfcc, y_pred_cv, target_names=['Background', 'Drone'], zero_division=0))
 # %%
